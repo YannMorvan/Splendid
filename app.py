@@ -23,7 +23,6 @@ from flask_cors import CORS
 from src.model import build_model
 from src.dataset import CLASS_NAMES, NUM_CLASSES, IMAGENET_MEAN, IMAGENET_STD
 
-# ── Constants ──────────────────────────────────────────────────────────────────
 DEFAULT_MODEL = Path(__file__).parent / 'models' / 'best_model.pt'
 
 EVAL_TRANSFORM = transforms.Compose([
@@ -32,7 +31,6 @@ EVAL_TRANSFORM = transforms.Compose([
     transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
 ])
 
-# ── App setup ──────────────────────────────────────────────────────────────────
 app = Flask(__name__)
 CORS(app)
 
@@ -61,7 +59,6 @@ def load_model(model_path):
     print(f"Model loaded from {model_path} ({nc} classes: {CLASS_NAMES})")
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
     """Serve the webcam UI."""
@@ -117,7 +114,6 @@ def health():
     return jsonify({'status': 'ok', 'model_loaded': _model is not None})
 
 
-# ── Entry point ────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description='Face mask detection web server')
     parser.add_argument('--model', default=str(DEFAULT_MODEL),
@@ -129,8 +125,7 @@ def main():
     args = parser.parse_args()
 
     load_model(args.model)
-    print(f"\n🚀 Server running at http://{args.host}:{args.port}")
-    print("   Open that URL in your browser to start the demo.\n")
+    print(f"\nServer running at http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=False)
 
 
