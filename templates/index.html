@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="fr">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Détecteur de Masque</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Syne:wght@400;700;800&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            /* ── Variables ─────────────────────────────────────────────────── */
+            :root {
+                --green: #00ff88;
+                --red: #ff2d55;
+                --amber: #ffc107;
+                --bg: #0a0c0f;
+                --panel: #111318;
+                --border: #1e2530;
+                --text: #c8d6e8;
+                --mono: "Share Tech Mono", monospace;
+                --sans: "Syne", sans-serif;
+
+                --status-color: var(--amber);
+                --glow-color: var(--amber);
+            }
+
+            /* ── Reset & base ──────────────────────────────────────────────── */
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            body {
+                background: var(--bg);
+                color: var(--text);
+                font-family: var(--sans);
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 28px;
+                padding: 24px;
+                overflow: hidden;
+            }
+
+            /* scanline overlay */
+            body::before {
+                content: "";
+                position: fixed;
+                inset: 0;
+                background: repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(0, 0, 0, 0.06) 2px,
+                    rgba(0, 0, 0, 0.06) 4px
+                );
+                pointer-events: none;
+                z-index: 100;
+            }
+
+            /* ── Header ────────────────────────────────────────────────────── */
+            header {
+                text-align: center;
+            }
+            header h1 {
+                font-family: var(--sans);
+                font-weight: 800;
+                font-size: clamp(1.4rem, 3vw, 2rem);
+                letter-spacing: 0.18em;
+                text-transform: uppercase;
+                color: #fff;
+            }
+            header h1 span {
+                color: var(--green);
+            }
+            header p {
+                font-family: var(--mono);
+                font-size: 0.72rem;
+                color: #4a5568;
+                letter-spacing: 0.12em;
+                margin-top: 4px;
+                text-transform: uppercase;
+            }
+
+            /* ── Video frame ────────────────────────────────────────────────── */
+            .frame-wrapper {
+                position: relative;
+                display: inline-block;
+            }
+
+            /* The animated corner brackets */
+            .corner {
+                position: absolute;
+                width: 28px;
+                height: 28px;
+                border-color: var(--status-color);
+                border-style: solid;
+                transition: border-color 0.35s ease;
+                z-index: 10;
+            }
+            .corner.tl {
+                top: -4px;
+                left: -4px;
+                border-width: 3px 0 0 3px;
+            }
+            .corner.tr {
+                top: -4px;
+                right: -4px;
+                border-width: 3px 3px 0 0;
+            }
+            .corner.bl {
+                bottom: -4px;
+                left: -4px;
+                border-width: 0 0 3px 3px;
+            }
+            .corner.br {
+                bottom: -4px;
+                right: -4px;
+                border-width: 0 3px 3px 0;
+            }
+
+            /* The outer glowing border */
+            #video-container {
+                position: relative;
+                border: 2px solid var(--status-color);
+                border-radius: 4px;
+                box-shadow:
+                    0 0 12px var(--glow-color),
+                    inset 0 0 8px rgba(0, 0, 0, 0.6);
+                transition:
+                    border-color 0.35s ease,
+                    box-shadow 0.35s ease;
+                overflow: hidden;
+            }
+
+            video {
+                display: block;
+                width: min(520px, 90vw);
+                aspect-ratio: 4/3;
+                object-fit: cover;
+                transform: scaleX(-1); /* mirror */
+                border-radius: 2px;
+            }
+
+            /* hidden canvas used for frame capture */
+            #capture-canvas {
+                display: none;
+            }
+
+            /* ── Status badge ───────────────────────────────────────────────── */
+            #status-badge {
+                position: absolute;
+                bottom: 10px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(10, 12, 15, 0.82);
+                backdrop-filter: blur(6px);
+                border: 1px solid var(--status-color);
+                border-radius: 3px;
+                padding: 5px 18px;
+                font-family: var(--mono);
+                font-size: 0.8rem;
+                letter-spacing: 0.2em;
+                text-transform: uppercase;
+                color: var(--status-color);
+                transition:
+                    color 0.35s ease,
+                    border-color 0.35s ease;
+                white-space: nowrap;
+                pointer-events: none;
+                z-index: 20;
+            }
+
+            /* ── Colour state classes ───────────────────────────────────────── */
+            .state-mask {
+                --status-color: var(--green);
+                --glow-color: rgba(0, 255, 136, 0.45);
+            }
+            .state-nomask {
+                --status-color: var(--red);
+                --glow-color: rgba(255, 45, 85, 0.45);
+            }
+            .state-waiting {
+                --status-color: var(--amber);
+                --glow-color: rgba(255, 193, 7, 0.3);
+            }
+
+            /* ── Stats panel ────────────────────────────────────────────────── */
+            #stats-panel {
+                width: min(520px, 90vw);
+                background: var(--panel);
+                border: 1px solid var(--border);
+                border-radius: 4px;
+                padding: 16px 20px;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px 24px;
+            }
+
+            .stat-row {
+                display: flex;
+                flex-direction: column;
+                gap: 5px;
+            }
+            .stat-label {
+                font-family: var(--mono);
+                font-size: 0.62rem;
+                letter-spacing: 0.14em;
+                text-transform: uppercase;
+                color: #3d4f63;
+            }
+            .stat-value {
+                font-family: var(--mono);
+                font-size: 0.9rem;
+                color: var(--text);
+            }
+
+            /* Probability bar */
+            .prob-bar-wrap {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                grid-column: 1 / -1;
+            }
+            .prob-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .prob-name {
+                font-family: var(--mono);
+                font-size: 0.7rem;
+                letter-spacing: 0.08em;
+                width: 110px;
+                flex-shrink: 0;
+                color: #5a7080;
+            }
+            .prob-track {
+                flex: 1;
+                height: 5px;
+                background: #1a2030;
+                border-radius: 3px;
+                overflow: hidden;
+            }
+            .prob-fill {
+                height: 100%;
+                border-radius: 3px;
+                transition:
+                    width 0.25s ease,
+                    background-color 0.35s ease;
+            }
+            .prob-fill.mask-fill {
+                background: var(--green);
+            }
+            .prob-fill.nomask-fill {
+                background: var(--red);
+            }
+            .prob-pct {
+                font-family: var(--mono);
+                font-size: 0.7rem;
+                width: 40px;
+                text-align: right;
+                flex-shrink: 0;
+                color: var(--text);
+            }
+
+            /* ── Controls ───────────────────────────────────────────────────── */
+            .controls {
+                display: flex;
+                gap: 12px;
+            }
+            button {
+                font-family: var(--mono);
+                font-size: 0.75rem;
+                letter-spacing: 0.14em;
+                text-transform: uppercase;
+                padding: 9px 22px;
+                border-radius: 3px;
+                cursor: pointer;
+                border: 1px solid;
+                transition: all 0.2s;
+            }
+            #btn-start {
+                background: var(--green);
+                color: #000;
+                border-color: var(--green);
+            }
+            #btn-start:hover {
+                filter: brightness(1.15);
+            }
+
+            #btn-stop {
+                background: transparent;
+                color: var(--red);
+                border-color: var(--red);
+            }
+            #btn-stop:hover {
+                background: rgba(255, 45, 85, 0.12);
+            }
+            #btn-stop:disabled {
+                opacity: 0.35;
+                cursor: not-allowed;
+            }
+            #btn-start:disabled {
+                opacity: 0.35;
+                cursor: not-allowed;
+            }
+
+            /* ── Footer ─────────────────────────────────────────────────────── */
+            footer {
+                font-family: var(--mono);
+                font-size: 0.6rem;
+                letter-spacing: 0.12em;
+                color: #2a3545;
+                text-transform: uppercase;
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <h1>Splen<span>did</span></h1>
+            <p>Real-time · MobileNetV3 · Local</p>
+        </header>
+
+        <!-- Video -->
+        <div class="frame-wrapper">
+            <div id="video-container" class="state-waiting">
+                <video id="webcam" autoplay playsinline muted></video>
+                <div class="corner tl"></div>
+                <div class="corner tr"></div>
+                <div class="corner bl"></div>
+                <div class="corner br"></div>
+                <div id="status-badge">WAITING</div>
+            </div>
+        </div>
+
+        <canvas id="capture-canvas"></canvas>
+
+        <!-- Stats -->
+        <div id="stats-panel">
+            <div class="stat-row">
+                <span class="stat-label">Result</span>
+                <span class="stat-value" id="stat-label">—</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Confidence</span>
+                <span class="stat-value" id="stat-conf">—</span>
+            </div>
+
+            <div class="prob-bar-wrap">
+                <div class="stat-label">Probabilities</div>
+                <div class="prob-row">
+                    <span class="prob-name">With Mask</span>
+                    <div class="prob-track">
+                        <div
+                            class="prob-fill mask-fill"
+                            id="bar-mask"
+                            style="width: 0%"
+                        ></div>
+                    </div>
+                    <span class="prob-pct" id="pct-mask">0%</span>
+                </div>
+                <div class="prob-row">
+                    <span class="prob-name">Without Mask</span>
+                    <div class="prob-track">
+                        <div
+                            class="prob-fill nomask-fill"
+                            id="bar-nomask"
+                            style="width: 0%"
+                        ></div>
+                    </div>
+                    <span class="prob-pct" id="pct-nomask">0%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <button id="btn-start">▶ Start</button>
+            <button id="btn-stop" disabled>■ Stop</button>
+        </div>
+
+        <footer>
+            MaskDetect · local inference · no data sent online
+        </footer>
+
+        <script>
+            const PREDICT_URL = "/predict";
+            const FRAME_INTERVAL = 300; // ms between inference calls
+            const CANVAS_W = 224,
+                CANVAS_H = 224; // inference resolution
+
+            const video = document.getElementById("webcam");
+            const canvas = document.getElementById("capture-canvas");
+            const ctx = canvas.getContext("2d");
+            const container = document.getElementById("video-container");
+            const badge = document.getElementById("status-badge");
+            const btnStart = document.getElementById("btn-start");
+            const btnStop = document.getElementById("btn-stop");
+            const statLabel = document.getElementById("stat-label");
+            const statConf = document.getElementById("stat-conf");
+            const barMask = document.getElementById("bar-mask");
+            const barNomask = document.getElementById("bar-nomask");
+            const pctMask = document.getElementById("pct-mask");
+            const pctNomask = document.getElementById("pct-nomask");
+
+            canvas.width = CANVAS_W;
+            canvas.height = CANVAS_H;
+
+            let stream = null;
+            let intervalId = null;
+            let running = false;
+
+            function setUIState(state) {
+                // state: 'waiting' | 'mask' | 'nomask'
+                container.className = `state-${state}`;
+                const labels = {
+                    waiting: "WAITING",
+                    mask: "✓ MASK WORN",
+                    nomask: "✗ WITHOUT MASK",
+                };
+                badge.textContent = labels[state];
+            }
+
+            function updateStats(data) {
+                const p = data.probabilities;
+                const maskPct = Math.round(p["with_mask"] * 100);
+                const nomaskPct = Math.round(p["without_mask"] * 100);
+                const confPct = Math.round(data.confidence * 100);
+
+                statLabel.textContent =
+                    data.label === "with_mask" ? "With Mask" : "Without Mask";
+                statConf.textContent = `${confPct}%`;
+
+                barMask.style.width = maskPct + "%";
+                barNomask.style.width = nomaskPct + "%";
+                pctMask.textContent = maskPct + "%";
+                pctNomask.textContent = nomaskPct + "%";
+
+                setUIState(data.label === "with_mask" ? "mask" : "nomask");
+            }
+
+            async function captureAndPredict() {
+                if (!running) return;
+
+                ctx.save();
+                ctx.scale(-1, 1);
+                ctx.drawImage(video, -CANVAS_W, 0, CANVAS_W, CANVAS_H);
+                ctx.restore();
+
+                const b64 = canvas.toDataURL("image/jpeg", 0.85);
+
+                try {
+                    const resp = await fetch(PREDICT_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ image: b64 }),
+                    });
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+                    if (data.error) return;
+                    updateStats(data);
+                } catch (e) {
+                    // server unavailable — keep polling
+                }
+            }
+
+            btnStart.addEventListener("click", async () => {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: {
+                            width: { ideal: 640 },
+                            height: { ideal: 480 },
+                            facingMode: "user",
+                        },
+                        audio: false,
+                    });
+                    video.srcObject = stream;
+                    await video.play();
+
+                    running = true;
+                    intervalId = setInterval(captureAndPredict, FRAME_INTERVAL);
+
+                    setUIState("waiting");
+                    btnStart.disabled = true;
+                    btnStop.disabled = false;
+                } catch (err) {
+                    alert("Impossible d'accéder à la webcam : " + err.message);
+                }
+            });
+
+            btnStop.addEventListener("click", () => {
+                running = false;
+                clearInterval(intervalId);
+
+                if (stream) {
+                    stream.getTracks().forEach((t) => t.stop());
+                    stream = null;
+                }
+                video.srcObject = null;
+
+                setUIState("waiting");
+                statLabel.textContent = "—";
+                statConf.textContent = "—";
+                barMask.style.width = "0%";
+                barNomask.style.width = "0%";
+                pctMask.textContent = "0%";
+                pctNomask.textContent = "0%";
+
+                btnStart.disabled = false;
+                btnStop.disabled = true;
+            });
+        </script>
+    </body>
+</html>
